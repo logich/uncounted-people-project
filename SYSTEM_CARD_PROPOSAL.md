@@ -90,7 +90,6 @@ These could be added later if the project grows beyond a class project.
 | Database & accounts | Supabase | Free |
 | Website hosting | Vercel | Free |
 | Web framework | Next.js | Free / open source |
-| Domain name | TBD | ~$10/year or use free Vercel subdomain |
 
 Everything runs on free tiers. No ongoing cost for a proof of concept.
 
