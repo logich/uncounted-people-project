@@ -1,64 +1,93 @@
 'use client'
 
 import { useEffect, useState } from 'react'
-import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
 import type { System, Alter } from '@/lib/types'
 import AlterCard from '@/components/AlterCard'
 import AlterForm from '@/components/AlterForm'
 
-type Props = {
-  system: System | null
-  alters: Alter[]
-  userId: string
-}
-
-export default function DashboardClient({ system: initialSystem, alters: initialAlters, userId }: Props) {
-  const router = useRouter()
+export default function DashboardClient() {
   const supabase = createClient()
 
-  const [system, setSystem] = useState(initialSystem)
-  const [alters, setAlters] = useState(initialAlters)
-  const [editingProfile, setEditingProfile] = useState(!initialSystem)
+  const [userId, setUserId]   = useState<string | null>(null)
+  const [system, setSystem]   = useState<System | null>(null)
+  const [alters, setAlters]   = useState<Alter[]>([])
+  const [loading, setLoading] = useState(true)
+
+  const [editingProfile, setEditingProfile] = useState(false)
   const [profileForm, setProfileForm] = useState({
-    collective_name: initialSystem?.collective_name ?? '',
-    collective_pronouns: initialSystem?.collective_pronouns ?? '',
-    description: initialSystem?.description ?? '',
-    theme_color: initialSystem?.theme_color ?? '#C0396B',
+    collective_name: '',
+    collective_pronouns: '',
+    description: '',
+    theme_color: '#C0396B',
   })
-  const [showAlterForm, setShowAlterForm] = useState(false)
-  const [editingAlter, setEditingAlter] = useState<Alter | null>(null)
-  const [copied, setCopied] = useState(false)
-  const [error, setError] = useState<string | null>(null)
-  const [origin, setOrigin] = useState('')
+  const [showAlterForm, setShowAlterForm]   = useState(false)
+  const [editingAlter, setEditingAlter]     = useState<Alter | null>(null)
+  const [copied, setCopied]                 = useState(false)
+  const [error, setError]                   = useState<string | null>(null)
+  const [origin, setOrigin]                 = useState('')
 
   useEffect(() => { setOrigin(window.location.origin) }, [])
+
+  // Auth check and initial data load
+  useEffect(() => {
+    async function init() {
+      const { data: { session } } = await supabase.auth.getSession()
+      if (!session) {
+        window.location.href = '/login'
+        return
+      }
+
+      setUserId(session.user.id)
+
+      const { data: sys } = await supabase
+        .from('systems')
+        .select('*')
+        .eq('user_id', session.user.id)
+        .single()
+
+      if (sys) {
+        setSystem(sys)
+        setProfileForm({
+          collective_name:    sys.collective_name,
+          collective_pronouns: sys.collective_pronouns ?? '',
+          description:        sys.description ?? '',
+          theme_color:        sys.theme_color,
+        })
+
+        const { data: alts } = await supabase
+          .from('alters')
+          .select('*')
+          .eq('system_id', sys.id)
+          .order('display_order', { ascending: true })
+
+        setAlters(alts ?? [])
+      } else {
+        setEditingProfile(true)
+      }
+
+      setLoading(false)
+    }
+
+    init()
+  }, [])
 
   const shareUrl = system ? `${origin}/s/${system.share_token}` : null
   const fronting = alters.filter(a => a.is_fronting)
 
   async function saveProfile() {
     setError(null)
-    if (!profileForm.collective_name.trim()) {
-      setError('System name is required.')
-      return
-    }
+    if (!profileForm.collective_name.trim()) { setError('System name is required.'); return }
+    if (!userId) return
 
     if (system) {
       const { data, error } = await supabase
-        .from('systems')
-        .update(profileForm)
-        .eq('id', system.id)
-        .select()
-        .single()
+        .from('systems').update(profileForm).eq('id', system.id).select().single()
       if (error) { setError(error.message); return }
       setSystem(data)
     } else {
       const { data, error } = await supabase
-        .from('systems')
-        .insert({ ...profileForm, user_id: userId })
-        .select()
-        .single()
+        .from('systems').insert({ ...profileForm, user_id: userId }).select().single()
       if (error) { setError(error.message); return }
       setSystem(data)
     }
@@ -68,32 +97,22 @@ export default function DashboardClient({ system: initialSystem, alters: initial
   async function toggleFronting(alter: Alter) {
     const nowFronting = !alter.is_fronting
     const { error } = await supabase
-      .from('alters')
-      .update({ is_fronting: nowFronting })
-      .eq('id', alter.id)
+      .from('alters').update({ is_fronting: nowFronting }).eq('id', alter.id)
     if (error) { setError(error.message); return }
 
     if (nowFronting) {
-      await supabase.from('fronting_log').insert({
-        alter_id: alter.id,
-        system_id: alter.system_id,
-      })
+      await supabase.from('fronting_log').insert({ alter_id: alter.id, system_id: alter.system_id })
     } else {
-      await supabase
-        .from('fronting_log')
+      await supabase.from('fronting_log')
         .update({ ended_at: new Date().toISOString() })
-        .eq('alter_id', alter.id)
-        .is('ended_at', null)
+        .eq('alter_id', alter.id).is('ended_at', null)
     }
-
     setAlters(prev => prev.map(a => a.id === alter.id ? { ...a, is_fronting: nowFronting } : a))
   }
 
   async function toggleVisible(alter: Alter) {
     const { error } = await supabase
-      .from('alters')
-      .update({ is_visible: !alter.is_visible })
-      .eq('id', alter.id)
+      .from('alters').update({ is_visible: !alter.is_visible }).eq('id', alter.id)
     if (error) { setError(error.message); return }
     setAlters(prev => prev.map(a => a.id === alter.id ? { ...a, is_visible: !a.is_visible } : a))
   }
@@ -128,18 +147,22 @@ export default function DashboardClient({ system: initialSystem, alters: initial
     const bytes = crypto.getRandomValues(new Uint8Array(12))
     const newToken = Array.from(bytes).map(b => b.toString(16).padStart(2, '0')).join('')
     const { data, error } = await supabase
-      .from('systems')
-      .update({ share_token: newToken })
-      .eq('id', system.id)
-      .select()
-      .single()
+      .from('systems').update({ share_token: newToken }).eq('id', system.id).select().single()
     if (error) { setError(error.message); return }
     setSystem(data)
   }
 
   async function signOut() {
     await supabase.auth.signOut()
-    router.push('/login')
+    window.location.href = '/login'
+  }
+
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-amaryllis-bg flex items-center justify-center">
+        <p className="text-gray-400 text-sm">Loading…</p>
+      </div>
+    )
   }
 
   return (
@@ -166,10 +189,7 @@ export default function DashboardClient({ system: initialSystem, alters: initial
           <div className="flex justify-between items-center mb-4">
             <h2 className="text-lg font-semibold">Your System</h2>
             {system && !editingProfile && (
-              <button
-                onClick={() => setEditingProfile(true)}
-                className="text-sm text-amaryllis hover:underline"
-              >
+              <button onClick={() => setEditingProfile(true)} className="text-sm text-amaryllis hover:underline">
                 Edit
               </button>
             )}
@@ -190,9 +210,7 @@ export default function DashboardClient({ system: initialSystem, alters: initial
                 />
               </div>
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Collective pronouns
-                </label>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Collective pronouns</label>
                 <input
                   type="text"
                   value={profileForm.collective_pronouns}
@@ -228,10 +246,7 @@ export default function DashboardClient({ system: initialSystem, alters: initial
                   Save
                 </button>
                 {system && (
-                  <button
-                    onClick={() => setEditingProfile(false)}
-                    className="text-sm text-gray-500 hover:text-gray-700"
-                  >
+                  <button onClick={() => setEditingProfile(false)} className="text-sm text-gray-500 hover:text-gray-700">
                     Cancel
                   </button>
                 )}
@@ -240,12 +255,8 @@ export default function DashboardClient({ system: initialSystem, alters: initial
           ) : system ? (
             <div>
               <p className="font-medium">{system.collective_name}</p>
-              {system.collective_pronouns && (
-                <p className="text-sm text-gray-500 mt-0.5">{system.collective_pronouns}</p>
-              )}
-              {system.description && (
-                <p className="text-sm text-gray-600 mt-2 leading-relaxed">{system.description}</p>
-              )}
+              {system.collective_pronouns && <p className="text-sm text-gray-500 mt-0.5">{system.collective_pronouns}</p>}
+              {system.description && <p className="text-sm text-gray-600 mt-2 leading-relaxed">{system.description}</p>}
             </div>
           ) : null}
         </section>
@@ -256,26 +267,14 @@ export default function DashboardClient({ system: initialSystem, alters: initial
             <section className="bg-white rounded-2xl shadow-sm p-6">
               <h2 className="text-lg font-semibold mb-4">Who&apos;s Fronting</h2>
               {fronting.length === 0 ? (
-                <p className="text-sm text-gray-500">
-                  No one is marked as fronting right now. Use the buttons on your alters below.
-                </p>
+                <p className="text-sm text-gray-500">No one is marked as fronting right now.</p>
               ) : (
                 <div className="flex flex-wrap gap-2">
                   {fronting.map(alter => (
-                    <div
-                      key={alter.id}
-                      className="flex items-center gap-2 bg-amaryllis-light rounded-full px-3 py-1.5"
-                    >
-                      {alter.color && (
-                        <span
-                          className="w-3 h-3 rounded-full flex-shrink-0"
-                          style={{ backgroundColor: alter.color }}
-                        />
-                      )}
+                    <div key={alter.id} className="flex items-center gap-2 bg-amaryllis-light rounded-full px-3 py-1.5">
+                      {alter.color && <span className="w-3 h-3 rounded-full flex-shrink-0" style={{ backgroundColor: alter.color }} />}
                       <span className="text-sm font-medium">{alter.name}</span>
-                      {alter.pronouns && (
-                        <span className="text-xs text-gray-500">({alter.pronouns})</span>
-                      )}
+                      {alter.pronouns && <span className="text-xs text-gray-500">({alter.pronouns})</span>}
                     </div>
                   ))}
                 </div>
@@ -327,8 +326,7 @@ export default function DashboardClient({ system: initialSystem, alters: initial
             <section className="bg-white rounded-2xl shadow-sm p-6">
               <h2 className="text-lg font-semibold mb-2">Your Share Link</h2>
               <p className="text-sm text-gray-600 mb-4">
-                Send this link to people you trust. They can view your system card
-                without needing an account.
+                Send this link to people you trust. They can view your system card without needing an account.
               </p>
               <div className="flex gap-2">
                 <input

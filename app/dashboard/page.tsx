@@ -1,32 +1,5 @@
-import { redirect } from 'next/navigation'
-import { createClient } from '@/lib/supabase/server'
 import DashboardClient from './DashboardClient'
 
-export default async function DashboardPage() {
-  const supabase = createClient()
-
-  const { data: { session } } = await supabase.auth.getSession()
-  if (!session) redirect('/login')
-
-  const { data: system } = await supabase
-    .from('systems')
-    .select('*')
-    .eq('user_id', session.user.id)
-    .single()
-
-  const { data: alters } = system
-    ? await supabase
-        .from('alters')
-        .select('*')
-        .eq('system_id', system.id)
-        .order('display_order', { ascending: true })
-    : { data: [] }
-
-  return (
-    <DashboardClient
-      system={system ?? null}
-      alters={alters ?? []}
-      userId={session.user.id}
-    />
-  )
+export default function DashboardPage() {
+  return <DashboardClient />
 }
