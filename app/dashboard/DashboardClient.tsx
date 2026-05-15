@@ -96,9 +96,13 @@ export default function DashboardClient() {
 
   async function toggleFronting(alter: Alter) {
     const nowFronting = !alter.is_fronting
-    const { error } = await supabase
-      .from('alters').update({ is_fronting: nowFronting }).eq('id', alter.id)
+    const { data: updated, error } = await supabase
+      .from('alters').update({ is_fronting: nowFronting }).eq('id', alter.id).select()
     if (error) { setError(error.message); return }
+    if (!updated || updated.length === 0) {
+      setError('Could not save fronting change — your session may have expired. Please sign out and back in.')
+      return
+    }
 
     if (nowFronting) {
       await supabase.from('fronting_log').insert({ alter_id: alter.id, system_id: alter.system_id })
