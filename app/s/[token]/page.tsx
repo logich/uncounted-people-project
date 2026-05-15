@@ -2,6 +2,9 @@ import { notFound } from 'next/navigation'
 import { createAdminClient } from '@/lib/supabase/admin'
 import FrontingBadge from '@/components/FrontingBadge'
 
+// Always fetch fresh data — fronting status can change at any time
+export const dynamic = 'force-dynamic'
+
 export default async function PublicCardPage({ params }: { params: { token: string } }) {
   if (!process.env.SUPABASE_SERVICE_ROLE_KEY) {
     return (
